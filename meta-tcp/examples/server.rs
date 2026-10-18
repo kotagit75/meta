@@ -1,18 +1,19 @@
 use std::net::SocketAddr;
 
 use meta::overlay::{context::OverlayContext, factory::OverlayFactory};
-use meta_tcp::factory::TcpFactory;
+use meta_tcp::{factory::TcpFactory, listener::start_tcp_listener};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let tcp_peers: Vec<SocketAddr> = vec![];
+    let tcp_peers: Vec<SocketAddr> = vec!["127.0.0.1:8081".parse()?];
 
     let context = OverlayContext::new(TcpFactory, tcp_peers);
 
     println!("Network Id: {}", context.network_id());
     println!("Server Addr: {}", context.address());
 
+    start_tcp_listener("127.0.0.1:8080".parse()?, context.clone()).await;
     let factory = OverlayFactory::new(context);
     let mut listener = factory.listen();
 
@@ -30,7 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     Ok(n) => {
                         let received = String::from_utf8_lossy(&buf[..n]);
-                        println!("[Server] Received: {}", received);
+                        println!("Received: {}", received);
                         if let Err(e) = stream.write_all(&buf[..n]).await {
                             eprintln!("Failed to echo back: {}", e);
                             break;
