@@ -1,0 +1,8 @@
+[package]
+name = "meta-tcp"
+edition = "2024"
+version.workspace = true
+
+[dependencies]
+meta.workspace = true
+tokio = { workspace = true, features = ["full"] }
