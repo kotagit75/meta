@@ -6,15 +6,17 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let listen_addr: SocketAddr = "127.0.0.1:8080".parse()?;
     let tcp_peers: Vec<SocketAddr> = vec!["127.0.0.1:8081".parse()?];
 
-    let context = OverlayContext::new(TcpFactory, tcp_peers);
+    let context =
+        OverlayContext::with_advertise(uuid::Uuid::new_v4(), TcpFactory, tcp_peers, listen_addr);
 
     println!("Network Id: {}", context.network_id());
     println!("Server Addr: {}", context.address());
 
-    start_tcp_listener("127.0.0.1:8080".parse()?, context.clone()).await;
-    let factory = OverlayFactory::new(context);
+    start_tcp_listener(listen_addr, context.clone()).await;
+    let factory = OverlayFactory::new(context.clone());
     let mut listener = factory.listen();
 
     loop {

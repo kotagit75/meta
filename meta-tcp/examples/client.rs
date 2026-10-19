@@ -30,16 +30,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .read_line(&mut server_addr_str)
         .expect("Failed to read line");
 
-    let context = OverlayContext::with_network(
+    let listen_addr: SocketAddr = "127.0.0.1:8081".parse()?;
+    let context = OverlayContext::with_advertise(
         Uuid::from_str(&network_id_str.trim()).unwrap(),
         TcpFactory,
         tcp_peers,
+        listen_addr,
     );
 
     println!("Client Addr: {}", context.address());
 
-    start_tcp_listener("127.0.0.1:8081".parse()?, context.clone()).await;
-    let factory = OverlayFactory::new(context);
+    start_tcp_listener(listen_addr, context.clone()).await;
+    let factory = OverlayFactory::new(context.clone());
+
     let server_addr: OverlayAddress = server_addr_str.trim().parse().unwrap();
     let mut stream = factory.connect(server_addr).await.unwrap();
 

@@ -7,10 +7,10 @@ use uuid::Uuid;
 
 use crate::{
     factory::Factory,
-    gossip::cache::SeenCache,
+    gossip::{cache::SeenCache, peers::PeerStore},
     overlay::{
         address::{Keypair, OverlayAddress},
-        message::GossipMessage,
+        message::{GossipMessage, PeerExchangePayload},
     },
 };
 
@@ -36,19 +36,20 @@ impl OutgoingLocalMessage {
     }
 }
 
-pub struct GossipNodeHandle {
+pub struct GossipNodeHandle<F: Factory> {
     pub address: OverlayAddress,
     pub network_id: Uuid,
     pub local_tx: mpsc::Sender<OutgoingLocalMessage>,
     pub upper_rx: mpsc::Receiver<GossipMessage>,
     pub peer_tx: mpsc::Sender<GossipMessage>,
+    pub peer_store: PeerStore<F::Address>,
 }
 
 pub struct GossipNode<F: Factory> {
     pub network_id: Uuid,
     pub keypair: Arc<Keypair>,
     pub lower_factory: F,
-    pub lower_peers: Vec<F::Address>,
+    pub peer_store: PeerStore<F::Address>,
     pub cache: SeenCache,
     pub local_rx: mpsc::Receiver<OutgoingLocalMessage>,
     pub peer_rx: mpsc::Receiver<GossipMessage>,
@@ -62,21 +63,24 @@ impl<F: Factory> GossipNode<F> {
         keypair: Keypair,
         lower_factory: F,
         lower_peers: Vec<F::Address>,
+        advertise_addr: Option<F::Address>,
         default_ttl: u8,
         buffer_size: usize,
-    ) -> GossipNodeHandle {
+    ) -> GossipNodeHandle<F> {
         let address = keypair.address;
         let keypair = Arc::new(keypair);
-
+ 
         let (local_tx, local_rx) = mpsc::channel(buffer_size);
         let (peer_tx, peer_rx) = mpsc::channel(buffer_size);
         let (upper_tx, upper_rx) = mpsc::channel(buffer_size);
+
+        let peer_store = PeerStore::new(advertise_addr, lower_peers);
 
         let node = Self {
             network_id,
             keypair,
             lower_factory,
-            lower_peers,
+            peer_store: peer_store.clone(),
             cache: SeenCache::with_default(),
             local_rx,
             peer_rx,
@@ -92,13 +96,23 @@ impl<F: Factory> GossipNode<F> {
             local_tx,
             upper_rx,
             peer_tx,
+            peer_store,
         }
     }
 
     /// イベントループの実行
     pub async fn run(mut self) {
+        // 起動直後に初回 PEX アナウンス
+        self.send_peer_exchange();
+
+        let mut discovery_interval = tokio::time::interval(tokio::time::Duration::from_secs(3));
+        discovery_interval.tick().await;
+
         loop {
             tokio::select! {
+                _ = discovery_interval.tick() => {
+                    self.send_peer_exchange();
+                }
                 Some(local_msg) = self.local_rx.recv() => {
                     self.handle_local(local_msg).await;
                 }
@@ -107,6 +121,27 @@ impl<F: Factory> GossipNode<F> {
                 }
                 else => break,
             }
+        }
+    }
+
+    /// 定期またはイベント駆動での PEX (Peer Exchange) 発信
+    fn send_peer_exchange(&mut self) {
+        let pex = PeerExchangePayload::new(
+            self.peer_store.self_addr().cloned(),
+            self.peer_store.sample_peers(10),
+        );
+        if let Ok(payload) = pex.encode() {
+            let id = Uuid::new_v4().to_string();
+            let msg = GossipMessage::new_control(
+                &self.keypair.signing_key,
+                self.network_id,
+                self.keypair.address,
+                id,
+                payload,
+                self.default_ttl,
+            );
+            self.cache.check_and_insert(&msg.id);
+            self.broadcast(&msg);
         }
     }
 
@@ -129,10 +164,23 @@ impl<F: Factory> GossipNode<F> {
             return;
         }
 
-        // 3. 他ネットワークのパケットであってもゴシップ網の接続性のためにリレー
+        // 3. 制御メッセージ（PeerExchange等）の処理
+        if msg.is_control {
+            if let Ok(pex) = PeerExchangePayload::<F::Address>::decode(&msg.payload) {
+                if let Some(listen_addr) = pex.listen_addr {
+                    self.peer_store.add_peer(listen_addr);
+                }
+                self.peer_store.add_peers(pex.known_peers);
+            }
+            // 制御メッセージもゴシップ網の拡散のためにリレー
+            self.maybe_relay(&msg);
+            return;
+        }
+
+        // 4. 他ネットワークのパケットであってもゴシップ網の接続性のためにリレー
         self.maybe_relay(&msg);
 
-        // 4. 自ネットワークに属するメッセージのみ上位層へ配送
+        // 5. 自ネットワークに属するメッセージのみ上位層へ配送
         self.maybe_deliver_upper(msg).await;
     }
 
@@ -173,7 +221,7 @@ impl<F: Factory> GossipNode<F> {
         };
         let bytes = Bytes::from(encoded);
 
-        for peer_addr in self.lower_peers.clone() {
+        for peer_addr in self.peer_store.get_peers() {
             let factory = self.lower_factory.clone();
             let data = bytes.clone();
 

@@ -6,7 +6,10 @@ use uuid::Uuid;
 
 use crate::{
     factory::Factory,
-    gossip::node::{GossipNode, GossipNodeHandle, OutgoingLocalMessage},
+    gossip::{
+        node::{GossipNode, GossipNodeHandle, OutgoingLocalMessage},
+        peers::PeerStore,
+    },
     overlay::{
         address::{Keypair, OverlayAddress},
         message::{GossipMessage, StreamFrame},
@@ -21,7 +24,7 @@ pub struct OverlayContext<F: Factory> {
     pub network_id: Uuid,
     pub keypair: Arc<Keypair>,
     pub lower_factory: F,
-    pub lower_peers: Vec<F::Address>,
+    pub peer_store: PeerStore<F::Address>,
     pub local_tx: mpsc::Sender<OutgoingLocalMessage>,
     pub peer_tx: mpsc::Sender<GossipMessage>,
     pub active_streams: Arc<Mutex<ActiveStreamMap>>,
@@ -49,6 +52,33 @@ impl<F: Factory> OverlayContext<F> {
         lower_factory: F,
         lower_peers: Vec<F::Address>,
     ) -> Self {
+        Self::with_options(network_id, keypair, lower_factory, lower_peers, None)
+    }
+
+    /// 広告用アドレス（自身の受付アドレス）を指定してノードを生成
+    pub fn with_advertise(
+        network_id: Uuid,
+        lower_factory: F,
+        lower_peers: Vec<F::Address>,
+        advertise_addr: F::Address,
+    ) -> Self {
+        Self::with_options(
+            network_id,
+            Keypair::generate(),
+            lower_factory,
+            lower_peers,
+            Some(advertise_addr),
+        )
+    }
+
+    /// 全オプションを指定してノードを生成
+    pub fn with_options(
+        network_id: Uuid,
+        keypair: Keypair,
+        lower_factory: F,
+        lower_peers: Vec<F::Address>,
+        advertise_addr: Option<F::Address>,
+    ) -> Self {
         let address = keypair.address;
         let GossipNodeHandle {
             address: _,
@@ -56,11 +86,13 @@ impl<F: Factory> OverlayContext<F> {
             local_tx,
             upper_rx,
             peer_tx,
+            peer_store,
         } = GossipNode::spawn(
             network_id,
             keypair.clone(),
             lower_factory.clone(),
-            lower_peers.clone(),
+            lower_peers,
+            advertise_addr,
             DEFAULT_GOSSIP_TTL,
             DEFAULT_GOSSIP_BUFFER_SIZE,
         );
@@ -80,12 +112,24 @@ impl<F: Factory> OverlayContext<F> {
             network_id,
             keypair: Arc::new(keypair),
             lower_factory,
-            lower_peers,
+            peer_store,
             local_tx,
             peer_tx,
             active_streams,
             inbound_stream_rx: Arc::new(Mutex::new(inbound_rx)),
         }
+    }
+
+    pub fn peer_store(&self) -> &PeerStore<F::Address> {
+        &self.peer_store
+    }
+
+    pub fn peers(&self) -> Vec<F::Address> {
+        self.peer_store.get_peers()
+    }
+
+    pub fn add_peer(&self, addr: F::Address) -> bool {
+        self.peer_store.add_peer(addr)
     }
 
     pub fn network_id(&self) -> Uuid {
