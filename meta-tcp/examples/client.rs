@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let listen_addr: SocketAddr = "127.0.0.1:8081".parse()?;
     let tcp_peers: Vec<SocketAddr> = vec!["127.0.0.1:8080".parse()?];
 
     print!("Network Id: ");
@@ -30,7 +31,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .read_line(&mut server_addr_str)
         .expect("Failed to read line");
 
-    let listen_addr: SocketAddr = "127.0.0.1:8081".parse()?;
     let context = OverlayContext::with_advertise(
         Uuid::from_str(&network_id_str.trim()).unwrap(),
         TcpFactory,
