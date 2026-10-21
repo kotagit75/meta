@@ -4,6 +4,6 @@
 </div>
 
 ## ✨ Features
-- **Recursive Overlay Network**: Deploy virtual networks using any communication stream (TCP, WebSocket, or **Origamic itself**) as a foundation.
-- **Virtual Stream Multiplexing**: Build and multiplex multiple TCP-like bidirectional virtual stream communications simultaneously on top of a single-shot gossip message network.
-- **Secure Design**: Verify the authenticity of all messages using addresses and digital signatures based on Ed25519 key pairs. The network is securely isolated by UUIDs.
+- 🔁 **Recursive Overlay Network**: Deploy virtual networks using any communication stream (TCP, WebSocket, or **Origamic itself**) as a foundation.
+- 🌐 **Virtual Stream Multiplexing**: Build and multiplex multiple TCP-like bidirectional virtual stream communications simultaneously on top of a single-shot gossip message network.
+- 🔐 **Secure Design**: Verify the authenticity of all messages using addresses and digital signatures based on Ed25519 key pairs. The network is securely isolated by UUIDs.
