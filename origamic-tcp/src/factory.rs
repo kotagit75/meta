@@ -1,4 +1,4 @@
-use meta::factory::Factory;
+use origamic::factory::Factory;
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
 

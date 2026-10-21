@@ -4,11 +4,11 @@ use std::{
     str::FromStr,
 };
 
-use meta::{
+use origamic::{
     factory::Factory,
     overlay::{address::OverlayAddress, context::OverlayContext, factory::OverlayFactory},
 };
-use meta_tcp::{factory::TcpFactory, listener::start_tcp_listener};
+use origamic_tcp::{factory::TcpFactory, listener::start_tcp_listener};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 

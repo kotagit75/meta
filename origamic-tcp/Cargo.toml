@@ -1,9 +1,9 @@
 [package]
-name = "meta-tcp"
+name = "origamic-tcp"
 edition = "2024"
 version.workspace = true
 
 [dependencies]
-meta.workspace = true
+origamic.workspace = true
 tokio = { workspace = true, features = ["full"] }
 uuid = { workspace = true, features = ["v4", "serde"] }

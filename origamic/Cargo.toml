@@ -1,5 +1,5 @@
 [package]
-name = "meta"
+name = "origamic"
 version.workspace = true
 edition = "2024"
 

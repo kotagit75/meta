@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use meta::{gossip::node::process_inbound_stream, overlay::context::OverlayContext};
+use origamic::{gossip::node::process_inbound_stream, overlay::context::OverlayContext};
 use tokio::net::TcpListener;
 
 use crate::factory::TcpFactory;
