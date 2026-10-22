@@ -4,7 +4,6 @@ version.workspace = true
 edition = "2024"
 
 [dependencies]
-tokio-stream = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 uuid = { workspace = true, features = ["v4", "serde"] }
 ed25519-dalek = { workspace = true, features = ["rand_core"] }
