@@ -8,7 +8,7 @@ use origamic::{
     factory::Factory,
     overlay::{address::OverlayAddress, context::OverlayContext, factory::OverlayFactory},
 };
-use origamic_tcp::{factory::TcpFactory, listener::start_tcp_listener};
+use origamic_tcp::factory::TcpFactory;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 
@@ -33,14 +33,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let context = OverlayContext::with_advertise(
         Uuid::from_str(&network_id_str.trim()).unwrap(),
-        TcpFactory,
+        TcpFactory::new(),
         tcp_peers,
         listen_addr,
     );
 
     println!("Client Addr: {}", context.address());
 
-    start_tcp_listener(listen_addr, context.clone()).await;
     let factory = OverlayFactory::new(context.clone());
 
     let server_addr: OverlayAddress = server_addr_str.trim().parse().unwrap();

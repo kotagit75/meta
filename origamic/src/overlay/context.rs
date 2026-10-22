@@ -92,7 +92,7 @@ impl<F: Factory> OverlayContext<F> {
             keypair.clone(),
             lower_factory.clone(),
             lower_peers,
-            advertise_addr,
+            advertise_addr.clone(),
             DEFAULT_GOSSIP_TTL,
             DEFAULT_GOSSIP_BUFFER_SIZE,
         );
@@ -107,6 +107,19 @@ impl<F: Factory> OverlayContext<F> {
             local_tx.clone(),
             inbound_tx,
         );
+
+        // 下位トランスポートのインバウンドリスナーを自動起動
+        let factory_for_listener = lower_factory.clone();
+        let addr_for_listener = advertise_addr;
+        let peer_tx_for_listener = peer_tx.clone();
+        tokio::spawn(async move {
+            if let Err(e) = factory_for_listener
+                .start_listener(addr_for_listener, peer_tx_for_listener)
+                .await
+            {
+                eprintln!("Failed to start lower transport listener: {}", e);
+            }
+        });
 
         Self {
             network_id,

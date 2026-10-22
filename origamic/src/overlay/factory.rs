@@ -4,11 +4,11 @@ use tokio::sync::mpsc;
 
 use crate::{
     factory::Factory,
-    gossip::node::OutgoingLocalMessage,
+    gossip::node::{OutgoingLocalMessage, process_inbound_stream},
     overlay::{
         address::OverlayAddress,
         context::OverlayContext,
-        message::StreamFrame,
+        message::{GossipMessage, StreamFrame},
         stream::{OverlayListener, OverlayStream},
     },
 };
@@ -59,6 +59,23 @@ impl<F: Factory> Factory for OverlayFactory<F> {
 
         let overlay_stream = OverlayStream::new(user_stream, addr);
         async move { Ok(overlay_stream) }
+    }
+
+    async fn start_listener(
+        &self,
+        _bind_addr: Option<Self::Address>,
+        peer_tx: mpsc::Sender<GossipMessage>,
+    ) -> std::io::Result<()> {
+        let mut listener = self.listen();
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                let tx = peer_tx.clone();
+                tokio::spawn(async move {
+                    let _ = process_inbound_stream(stream, tx).await;
+                });
+            }
+        });
+        Ok(())
     }
 }
 
