@@ -21,14 +21,12 @@ type ActiveStreamMap = HashMap<(OverlayAddress, u64), mpsc::Sender<Vec<u8>>>;
 
 #[derive(Clone)]
 pub struct OverlayContext<F: Factory> {
-    pub network_id: Uuid,
-    pub keypair: Arc<Keypair>,
-    pub lower_factory: F,
-    pub peer_store: PeerStore<F::Address>,
-    pub local_tx: mpsc::Sender<OutgoingLocalMessage>,
-    pub peer_tx: mpsc::Sender<GossipMessage>,
-    pub active_streams: Arc<Mutex<ActiveStreamMap>>,
-    pub inbound_stream_rx: Arc<Mutex<mpsc::Receiver<(OverlayStream<F>, OverlayAddress)>>>,
+    network_id: Uuid,
+    keypair: Arc<Keypair>,
+    peer_store: PeerStore<F::Address>,
+    pub(crate) local_tx: mpsc::Sender<OutgoingLocalMessage>,
+    pub(crate) active_streams: Arc<Mutex<ActiveStreamMap>>,
+    pub(crate) inbound_stream_rx: Arc<Mutex<mpsc::Receiver<(OverlayStream<F>, OverlayAddress)>>>,
 }
 
 const DEFAULT_GOSSIP_TTL: u8 = 7;
@@ -124,10 +122,8 @@ impl<F: Factory> OverlayContext<F> {
         Self {
             network_id,
             keypair: Arc::new(keypair),
-            lower_factory,
             peer_store,
             local_tx,
-            peer_tx,
             active_streams,
             inbound_stream_rx: Arc::new(Mutex::new(inbound_rx)),
         }
