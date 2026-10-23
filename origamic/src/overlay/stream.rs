@@ -1,15 +1,17 @@
+use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, DuplexStream, ReadBuf};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, mpsc, oneshot};
 
 use crate::{factory::Factory, overlay::address::OverlayAddress};
 
 pub struct OverlayStream<F: Factory> {
     pub(crate) inner: DuplexStream,
     pub(crate) peer_addr: OverlayAddress,
+    pub(crate) shutdown_rx: Option<oneshot::Receiver<()>>,
     pub(crate) _phantom: PhantomData<fn() -> F>,
 }
 
@@ -20,6 +22,20 @@ impl<F: Factory> OverlayStream<F> {
         Self {
             inner,
             peer_addr,
+            shutdown_rx: None,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn with_shutdown_rx(
+        inner: DuplexStream,
+        peer_addr: OverlayAddress,
+        shutdown_rx: oneshot::Receiver<()>,
+    ) -> Self {
+        Self {
+            inner,
+            peer_addr,
+            shutdown_rx: Some(shutdown_rx),
             _phantom: PhantomData,
         }
     }
@@ -52,8 +68,19 @@ impl<F: Factory> AsyncWrite for OverlayStream<F> {
         Pin::new(&mut self.get_mut().inner).poll_flush(cx)
     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        let _ = Pin::new(&mut self.inner).poll_shutdown(cx)?;
+        if let Some(rx) = self.shutdown_rx.as_mut() {
+            match Pin::new(rx).poll(cx) {
+                Poll::Ready(_) => {
+                    self.shutdown_rx = None;
+                    Poll::Ready(Ok(()))
+                }
+                Poll::Pending => Poll::Pending,
+            }
+        } else {
+            Poll::Ready(Ok(()))
+        }
     }
 }
 

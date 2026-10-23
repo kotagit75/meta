@@ -14,10 +14,11 @@ use crate::{
     },
 };
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct OutgoingLocalMessage {
     pub recipient: Option<OverlayAddress>,
     pub payload: Vec<u8>,
+    pub done_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 impl OutgoingLocalMessage {
@@ -25,6 +26,7 @@ impl OutgoingLocalMessage {
         Self {
             recipient: None,
             payload,
+            done_tx: None,
         }
     }
 
@@ -32,6 +34,19 @@ impl OutgoingLocalMessage {
         Self {
             recipient: Some(recipient),
             payload,
+            done_tx: None,
+        }
+    }
+
+    pub fn to_with_done(
+        recipient: OverlayAddress,
+        payload: Vec<u8>,
+        done_tx: tokio::sync::oneshot::Sender<()>,
+    ) -> Self {
+        Self {
+            recipient: Some(recipient),
+            payload,
+            done_tx: Some(done_tx),
         }
     }
 }
@@ -69,7 +84,7 @@ impl<F: Factory> GossipNode<F> {
     ) -> GossipNodeHandle<F> {
         let address = keypair.address;
         let keypair = Arc::new(keypair);
- 
+
         let (local_tx, local_rx) = mpsc::channel(buffer_size);
         let (peer_tx, peer_rx) = mpsc::channel(buffer_size);
         let (upper_tx, upper_rx) = mpsc::channel(buffer_size);
@@ -147,9 +162,10 @@ impl<F: Factory> GossipNode<F> {
 
     /// 自ノードからの新規メッセージ発信処理 (FromLocal)
     async fn handle_local(&mut self, local_msg: OutgoingLocalMessage) {
-        let msg = self.create_signed_message(local_msg);
+        let done_tx = local_msg.done_tx;
+        let msg = self.create_signed_message(local_msg.recipient, local_msg.payload);
         self.cache.check_and_insert(&msg.id);
-        self.broadcast(&msg);
+        self.broadcast_with_done(&msg, done_tx);
     }
 
     /// ピアから受信したメッセージのパイプライン処理 (FromPeer)
@@ -185,15 +201,19 @@ impl<F: Factory> GossipNode<F> {
     }
 
     /// メッセージ作成ヘルパー
-    fn create_signed_message(&self, local_msg: OutgoingLocalMessage) -> GossipMessage {
+    fn create_signed_message(
+        &self,
+        recipient: Option<OverlayAddress>,
+        payload: Vec<u8>,
+    ) -> GossipMessage {
         let id = Uuid::new_v4().to_string();
         GossipMessage::new_signed(
             &self.keypair.signing_key,
             self.network_id,
             self.keypair.address,
-            local_msg.recipient,
+            recipient,
             id,
-            local_msg.payload,
+            payload,
             self.default_ttl,
         )
     }
@@ -216,19 +236,51 @@ impl<F: Factory> GossipNode<F> {
 
     /// 下位ピアへのメッセージブロードキャスト
     fn broadcast(&self, msg: &GossipMessage) {
+        self.broadcast_with_done(msg, None);
+    }
+
+    /// 下位ピアへのメッセージブロードキャスト（完了通知付き）
+    fn broadcast_with_done(
+        &self,
+        msg: &GossipMessage,
+        done_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    ) {
         let Ok(encoded) = msg.encode() else {
+            if let Some(tx) = done_tx {
+                let _ = tx.send(());
+            }
             return;
         };
         let bytes = Bytes::from(encoded);
+        let peers = self.peer_store.get_peers();
 
-        for peer_addr in self.peer_store.get_peers() {
+        if peers.is_empty() {
+            if let Some(tx) = done_tx {
+                let _ = tx.send(());
+            }
+            return;
+        }
+
+        let total = peers.len();
+        let counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let done_tx_shared = Arc::new(tokio::sync::Mutex::new(done_tx));
+
+        for peer_addr in peers {
             let factory = self.lower_factory.clone();
             let data = bytes.clone();
+            let counter = counter.clone();
+            let done_tx_shared = done_tx_shared.clone();
 
             tokio::spawn(async move {
                 if let Ok(stream) = factory.connect(peer_addr).await {
                     let mut framed = Framed::new(stream, LengthDelimitedCodec::new());
                     let _ = framed.send(data).await;
+                }
+                let prev = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if prev + 1 == total {
+                    if let Some(tx) = done_tx_shared.lock().await.take() {
+                        let _ = tx.send(());
+                    }
                 }
             });
         }

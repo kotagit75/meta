@@ -201,6 +201,11 @@ fn start_stream_router_task<F: Factory>(
             let key = (msg.sender, frame.stream_id);
             let mut streams = active_streams.lock().await;
 
+            if frame.is_close {
+                streams.remove(&key);
+                continue;
+            }
+
             if let Some(stream_tx) = streams.get(&key) {
                 let _ = stream_tx.send(frame.data).await;
             } else if frame.is_init || !frame.data.is_empty() {
@@ -209,6 +214,7 @@ fn start_stream_router_task<F: Factory>(
                     key,
                     frame.data,
                     &mut streams,
+                    active_streams.clone(),
                     local_tx.clone(),
                     &inbound_tx,
                 )
@@ -223,11 +229,13 @@ async fn spawn_inbound_stream_bridge<F: Factory>(
     (sender_addr, stream_id): (OverlayAddress, u64),
     initial_data: Vec<u8>,
     streams: &mut ActiveStreamMap,
+    active_streams: Arc<Mutex<ActiveStreamMap>>,
     local_tx: mpsc::Sender<OutgoingLocalMessage>,
     inbound_tx: &mpsc::Sender<(OverlayStream<F>, OverlayAddress)>,
 ) {
     let (user_stream, internal_stream) = tokio::io::duplex(65536);
     let (to_stream_tx, mut from_router_rx) = mpsc::channel(256);
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
 
     let _ = to_stream_tx.send(initial_data).await;
     streams.insert((sender_addr, stream_id), to_stream_tx);
@@ -235,21 +243,31 @@ async fn spawn_inbound_stream_bridge<F: Factory>(
     tokio::spawn(async move {
         let (mut read_half, mut write_half) = tokio::io::split(internal_stream);
 
+        let mut shutdown_tx = Some(shutdown_tx);
         let send_task = async {
             let mut buf = vec![0u8; 4096];
             loop {
-                match read_half.read(&mut buf).await {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        let sf = StreamFrame::new_data(stream_id, buf[..n].to_vec());
-                        if let Ok(enc) = sf.encode() {
-                            let out = OutgoingLocalMessage::to(sender_addr, enc);
-                            if local_tx.send(out).await.is_err() {
-                                break;
-                            }
+                let sf = match read_half.read(&mut buf).await {
+                    Ok(0) => StreamFrame::new_close(stream_id),
+                    Ok(n) => StreamFrame::new_data(stream_id, buf[..n].to_vec()),
+                    Err(_) => StreamFrame::new_close(stream_id),
+                };
+                if let Ok(enc) = sf.encode() {
+                    if sf.is_close {
+                        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+                        let out = OutgoingLocalMessage::to_with_done(sender_addr, enc, done_tx);
+                        let _ = local_tx.send(out).await;
+                        let _ = done_rx.await;
+                        if let Some(tx) = shutdown_tx.take() {
+                            let _ = tx.send(());
+                        }
+                        break;
+                    } else {
+                        let out = OutgoingLocalMessage::to(sender_addr, enc);
+                        if local_tx.send(out).await.is_err() {
+                            break;
                         }
                     }
-                    Err(_) => break,
                 }
             }
         };
@@ -260,14 +278,18 @@ async fn spawn_inbound_stream_bridge<F: Factory>(
                     break;
                 }
             }
+            let _ = write_half.shutdown().await;
         };
 
         tokio::select! {
             _ = send_task => {},
             _ = recv_task => {},
         }
+
+        let mut map = active_streams.lock().await;
+        map.remove(&(sender_addr, stream_id));
     });
 
-    let new_stream = OverlayStream::new(user_stream, sender_addr);
+    let new_stream = OverlayStream::with_shutdown_rx(user_stream, sender_addr, shutdown_rx);
     let _ = inbound_tx.send((new_stream, sender_addr)).await;
 }

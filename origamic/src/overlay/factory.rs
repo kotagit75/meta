@@ -46,6 +46,7 @@ impl<F: Factory> Factory for OverlayFactory<F> {
         let (user_stream, internal_stream) = tokio::io::duplex(65536);
         let stream_id: u64 = rand::random();
         let (to_stream_tx, from_router_rx) = mpsc::channel(256);
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
 
         spawn_outbound_stream_bridge(
             addr,
@@ -53,11 +54,12 @@ impl<F: Factory> Factory for OverlayFactory<F> {
             internal_stream,
             to_stream_tx,
             from_router_rx,
+            shutdown_tx,
             self.context.active_streams.clone(),
             self.context.local_tx.clone(),
         );
 
-        let overlay_stream = OverlayStream::new(user_stream, addr);
+        let overlay_stream = OverlayStream::with_shutdown_rx(user_stream, addr, shutdown_rx);
         async move { Ok(overlay_stream) }
     }
 
@@ -86,6 +88,7 @@ fn spawn_outbound_stream_bridge(
     internal_stream: tokio::io::DuplexStream,
     to_stream_tx: mpsc::Sender<Vec<u8>>,
     mut from_router_rx: mpsc::Receiver<Vec<u8>>,
+    shutdown_tx: tokio::sync::oneshot::Sender<()>,
     active_streams: std::sync::Arc<
         tokio::sync::Mutex<std::collections::HashMap<(OverlayAddress, u64), mpsc::Sender<Vec<u8>>>>,
     >,
@@ -100,12 +103,25 @@ fn spawn_outbound_stream_bridge(
         let (mut read_half, mut write_half) = tokio::io::split(internal_stream);
 
         // 送信ブリッジ: user_stream への write を相手宛ての StreamFrame としてゴシップ網へ発信
+        let mut shutdown_tx = Some(shutdown_tx);
         let send_task = async {
             let mut buf = vec![0u8; 4096];
             let mut is_first = true;
             loop {
                 match read_half.read(&mut buf).await {
-                    Ok(0) => break, // EOF
+                    Ok(0) => {
+                        let close_frame = StreamFrame::new_close(stream_id);
+                        if let Ok(encoded) = close_frame.encode() {
+                            let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+                            let out = OutgoingLocalMessage::to_with_done(addr, encoded, done_tx);
+                            let _ = local_tx.send(out).await;
+                            let _ = done_rx.await;
+                        }
+                        if let Some(tx) = shutdown_tx.take() {
+                            let _ = tx.send(());
+                        }
+                        break;
+                    }
                     Ok(n) => {
                         let frame = if is_first {
                             is_first = false;
@@ -121,7 +137,19 @@ fn spawn_outbound_stream_bridge(
                             }
                         }
                     }
-                    Err(_) => break,
+                    Err(_) => {
+                        let close_frame = StreamFrame::new_close(stream_id);
+                        if let Ok(encoded) = close_frame.encode() {
+                            let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+                            let out = OutgoingLocalMessage::to_with_done(addr, encoded, done_tx);
+                            let _ = local_tx.send(out).await;
+                            let _ = done_rx.await;
+                        }
+                        if let Some(tx) = shutdown_tx.take() {
+                            let _ = tx.send(());
+                        }
+                        break;
+                    }
                 }
             }
         };
@@ -133,6 +161,7 @@ fn spawn_outbound_stream_bridge(
                     break;
                 }
             }
+            let _ = write_half.shutdown().await;
         };
 
         tokio::select! {
