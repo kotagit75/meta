@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
-    "origamic", "origamic-tcp",
+    "examples/*", "origamic", "origamic-core", "origamic-tcp",
 ]
 
 [workspace.package]
@@ -17,4 +17,6 @@ bincode = "1.3"
 tokio-util = { version = "0.7", features = ["codec"] }
 futures-util = { version = "0.3", features = ["sink"] }
 bytes = "1.10"
+origamic-core = { path = "origamic-core" }
+origamic-tcp = { path = "origamic-tcp" }
 origamic = { path = "origamic" }

@@ -1,4 +1,4 @@
-use origamic::{
+use origamic_core::{
     factory::Factory, gossip::node::process_inbound_stream, overlay::message::GossipMessage,
 };
 use std::net::SocketAddr;

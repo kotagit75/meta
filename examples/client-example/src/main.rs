@@ -5,10 +5,12 @@ use std::{
 };
 
 use origamic::{
-    factory::Factory,
-    overlay::{address::OverlayAddress, context::OverlayContext, factory::OverlayFactory},
+    core::{
+        factory::Factory,
+        overlay::{address::OverlayAddress, context::OverlayContext, factory::OverlayFactory},
+    },
+    tcp::factory::TcpFactory,
 };
-use origamic_tcp::factory::TcpFactory;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 

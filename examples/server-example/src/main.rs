@@ -1,7 +1,9 @@
 use std::net::SocketAddr;
 
-use origamic::overlay::{context::OverlayContext, factory::OverlayFactory};
-use origamic_tcp::factory::TcpFactory;
+use origamic::{
+    core::overlay::{context::OverlayContext, factory::OverlayFactory},
+    tcp::factory::TcpFactory,
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::main]

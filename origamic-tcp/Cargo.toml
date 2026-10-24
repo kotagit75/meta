@@ -4,6 +4,6 @@ edition = "2024"
 version.workspace = true
 
 [dependencies]
-origamic.workspace = true
+origamic-core.workspace = true
 tokio = { workspace = true, features = ["full"] }
 uuid = { workspace = true, features = ["v4", "serde"] }

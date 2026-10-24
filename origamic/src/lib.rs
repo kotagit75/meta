@@ -1,4 +1,2 @@
-pub mod factory;
-pub mod gossip;
-pub mod overlay;
-pub mod stream;
+pub use origamic_core as core;
+pub use origamic_tcp as tcp;

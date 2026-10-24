@@ -1,0 +1,9 @@
+[package]
+name = "server-example"
+edition = "2024"
+version.workspace = true
+
+[dependencies]
+origamic.workspace = true
+tokio.workspace = true
+uuid.workspace = true
